@@ -1,0 +1,54 @@
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+.env
+.venv/
+venv/
+pip-wheel-metadata/
+.mypy_cache/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Notebooks / experiments
+**/.ipynb_checkpoints/
+.notebook_cache/
+
+# Data science artifacts
+data/
+outputs/
+reports/
+.matplotlib-cache/
+logs/
+**/figures/
+*.h5
+*.hdf5
+*.npz
+*.pkl
+*.joblib
+*.ckpt
+
+# ML experiment tools (adjust if you use them)
+mlruns/
+wandb/
+tensorboard/
+lightning_logs/
+
+# IDEs / editors
+.vscode/
+.idea/
+*.swp
+
+# Project-specific notes
+to_do.txt
+jobs/

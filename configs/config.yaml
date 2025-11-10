@@ -1,0 +1,71 @@
+# Configuration for Supervised CNN Training on CDMS Prediction Task
+# Predicts trial label (0/1) based on the first 4 seconds of EEG.
+
+seed: 20170629 # Match the seed used in previous scripts for consistency
+
+dataset:
+  npz: data/npz/cdms_first4s.npz # Baseline dataset (first 4 seconds)
+  input_windows: 1       # We are feeding one 4s window per sample
+  forecast_windows: 0    # Not used, set to 0
+  task: detection        # Treat as detection (predict label for the input window)
+  level_tau: 0.5         # Threshold for metrics (labels are already 0/1)
+  stride: 1              # Not applicable as we have one window per trial
+  num_workers: 8         # Adjust based on your HPC node capabilities
+  batch_size: 96         # Larger batch smooths gradients on GPU
+  pin_memory: true
+  channel_remap: null    # Use all 14 channels in the order they were saved
+
+model:
+  name: cnn              # Use the supervisor's CNN model definition
+  params:
+    in_channels_eeg: 14  # Your dataset has 14 channels
+    time_len: 1024       # Your input window length (4s * 256Hz)
+    width: [64, 128]     # Slightly wider two-block CNN
+    kernels: [11, 7]
+    p_drop: 0.2          # Reduced dropout to let the model learn more
+    input_windows: 1     # Consistent with dataset.input_windows
+    pool_after: [0]      # Pool after second block
+
+    # --- CRITICAL: Ensure supervised training from scratch ---
+    pretrained:
+      encoder_path: null   # Set null for supervised training (no pretraining loaded)
+      strict: true         # Standard practice
+      # Freeze settings are irrelevant when encoder_path is null
+      freeze_encoder: false
+      freeze_head: false
+      trainable_layers: null
+      finetune:
+        head_lr: null
+        encoder_lr: null
+
+optimizer:
+  lr: 0.0003
+  weight_decay: 0.002
+
+trainer:
+  max_epochs: 50
+  min_epochs: 10
+  max_folds: null
+  accelerator: auto
+  devices: 1
+  enable_checkpointing: true
+  gradient_clip_val: 1.0
+  log_every_n_steps: 25   # Logging frequency
+
+folds:
+  mode: kfold             # 'logo' (leave-one-participant) or 'kfold'
+  num_folds: 5            # 5 participant-folds by default
+  seed: 20170629
+
+scheduler:
+  type: cosine
+  t_max: 50
+  eta_min: 5e-5
+
+wandb:
+  enabled: true          # Enable W&B logging if desired
+  project: cdms-predict  # Suggest a new project name for clarity
+  name: cnn_pred_logo    # Example run name (LOGO = LeaveOneGroupOut)
+
+report:
+  threshold: 0.5         # Threshold for calculating accuracy/metrics
