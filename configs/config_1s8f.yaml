@@ -1,4 +1,4 @@
-# Local quick-test config (single fold, single epoch)
+# 1-second windows (eight non-overlapping slices per trial)
 seed: 20170629
 
 dataset:
@@ -8,21 +8,21 @@ dataset:
   task: detection
   level_tau: 0.5
   stride: 1
-  num_workers: 0
-  batch_size: 64
-  pin_memory: false
+  num_workers: 8
+  batch_size: 128
+  pin_memory: true
   channel_remap: null
 
 model:
   name: cnn
   params:
     in_channels_eeg: 14
-    time_len: 256
-    width: [32, 64, 128]
-    kernels: [11, 7, 5]
-    p_drop: 0.1
+    time_len: 256          # 1 second * 256 Hz
+    width: [64, 128]
+    kernels: [11, 7]
+    p_drop: 0.2
     input_windows: 1
-    pool_after: [0, 1]
+    pool_after: [0]
     pretrained:
       encoder_path: null
       strict: true
@@ -34,19 +34,33 @@ model:
         encoder_lr: null
 
 optimizer:
-  lr: 0.000625
-  weight_decay: 0
+  lr: 0.0003
+  weight_decay: 0.002
 
 trainer:
-  max_epochs: 1
-  max_folds: 1
+  max_epochs: 50
+  min_epochs: 10
+  max_folds: null
   accelerator: auto
   devices: 1
-  enable_checkpointing: false
+  enable_checkpointing: true
+  gradient_clip_val: 1.0
   log_every_n_steps: 25
 
+folds:
+  mode: kfold
+  num_folds: 5
+  seed: 20170629
+
+scheduler:
+  type: cosine
+  t_max: 50
+  eta_min: 5e-5
+
 wandb:
-  enabled: false
+  enabled: true
+  project: cdms-predict
+  name: cnn_pred_1s8f
 
 report:
   threshold: 0.5

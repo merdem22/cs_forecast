@@ -20,10 +20,12 @@ from data.Hacettepe.cls import dataset_builder
 DEFAULT_DATA_DIR = "data/Recordings/SplittedDataWithAssumption-EliminatedPerSession"
 
 DATASETS = {
-    "first4s": dict(window_seconds=4.0, stride_seconds=4.0, max_windows_per_trial=1, out="data/npz/cdms_first4s.npz"),
+    # Non-overlapping slices covering the full 8 s trial
+    "1s_x8": dict(window_seconds=1.0, stride_seconds=1.0, max_windows_per_trial=8, out="data/npz/cdms_1s_x8.npz"),
     "2s_x4": dict(window_seconds=2.0, stride_seconds=2.0, max_windows_per_trial=4, out="data/npz/cdms_2s_x4.npz"),
-    "4s_x2": dict(window_seconds=4.0, stride_seconds=4.0, max_windows_per_trial=2, out="data/npz/cdms_4s_x2.npz"),
     "3s_stride1": dict(window_seconds=3.0, stride_seconds=1.0, max_windows_per_trial=0, out="data/npz/cdms_3s_stride1.npz"),
+    "4s_x2": dict(window_seconds=4.0, stride_seconds=4.0, max_windows_per_trial=2, out="data/npz/cdms_4s_x2.npz"),
+    "8s_x1": dict(window_seconds=8.0, stride_seconds=8.0, max_windows_per_trial=1, out="data/npz/cdms_8s_x1.npz"),
 }
 
 

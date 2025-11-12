@@ -1,11 +1,11 @@
 # Configuration for Supervised CNN Training on CDMS Prediction Task
-# Predicts trial label (0/1) based on the first 4 seconds of EEG.
+# Predicts trial label (0/1) using the full 8-second trial window.
 
 seed: 20170629 # Match the seed used in previous scripts for consistency
 
 dataset:
-  npz: data/npz/cdms_first4s.npz # Baseline dataset (first 4 seconds)
-  input_windows: 1       # We are feeding one 4s window per sample
+  npz: data/npz/cdms_8s_x1.npz # Entire 8-second trial as input
+  input_windows: 1       # Each sample is a single window
   forecast_windows: 0    # Not used, set to 0
   task: detection        # Treat as detection (predict label for the input window)
   level_tau: 0.5         # Threshold for metrics (labels are already 0/1)
@@ -19,7 +19,7 @@ model:
   name: cnn              # Use the supervisor's CNN model definition
   params:
     in_channels_eeg: 14  # Your dataset has 14 channels
-    time_len: 1024       # Your input window length (4s * 256Hz)
+    time_len: 2048       # 8 seconds * 256 Hz
     width: [64, 128]     # Slightly wider two-block CNN
     kernels: [11, 7]
     p_drop: 0.2          # Reduced dropout to let the model learn more
