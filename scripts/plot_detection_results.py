@@ -110,6 +110,10 @@ def main():
             baseline_entry["mean"] if baseline_entry is not None else stats["random_baseline"]
         )
         baseline_std = baseline_entry["std"] if baseline_entry is not None else 0.0
+        agg_metrics = summary_entry.get("aggregate_metrics") or {}
+        acc_agg = agg_metrics.get("accuracy", {})
+        mean_acc = acc_agg.get("mean", summary_entry.get("mean_accuracy"))
+        std_acc = acc_agg.get("std", summary_entry.get("std_accuracy"))
         records.append(
             dict(
                 key=key,
@@ -121,11 +125,12 @@ def main():
                 baseline=baseline_mean,
                 baseline_std=baseline_std,
                 positive_rate=stats["positive_rate"],
-                mean_acc=float(summary_entry["mean_accuracy"]),
-                std_acc=float(summary_entry["std_accuracy"]),
+                mean_acc=float(mean_acc) if mean_acc is not None else None,
+                std_acc=float(std_acc) if std_acc is not None else None,
                 baseline_source=(
                     baseline_entry["source"] if baseline_entry is not None else "analytic"
                 ),
+                aggregate_metrics=agg_metrics,
             )
         )
 
@@ -197,6 +202,48 @@ def main():
             f"pos_rate={rec['positive_rate']:.3f}, dataset={rec['dataset']}, "
             f"baseline_source={rec['baseline_source']}"
         )
+    have_metric_details = all(rec["aggregate_metrics"] for rec in records)
+    if have_metric_details:
+        metrics_to_plot = [
+            "accuracy",
+            "precision",
+            "recall",
+            "specificity",
+            "f1",
+            "balanced_accuracy",
+            "auc",
+        ]
+        fig2, axes = plt.subplots(
+            len(metrics_to_plot),
+            1,
+            sharex=True,
+            figsize=(10, 2.0 * len(metrics_to_plot)),
+        )
+        if len(metrics_to_plot) == 1:
+            axes = [axes]
+        for ax, metric in zip(axes, metrics_to_plot):
+            vals = [
+                rec["aggregate_metrics"].get(metric, {}).get("mean", np.nan)
+                for rec in records
+            ]
+            errs = [
+                rec["aggregate_metrics"].get(metric, {}).get("std", 0.0)
+                for rec in records
+            ]
+            ax.bar(x, vals, yerr=errs, color="#0288d1", alpha=0.8, capsize=6)
+            ax.set_ylabel(metric.replace("_", " ").title())
+            ax.set_ylim(0, 1)
+            ax.grid(axis="y", alpha=0.2)
+        axes[-1].set_xticks(x)
+        axes[-1].set_xticklabels(tick_labels)
+        fig2.suptitle("Per-metric performance across detection datasets")
+        fig2.tight_layout(rect=(0, 0, 1, 0.98))
+        out_path_multi = out_dir / "detection_metric_breakdown.png"
+        fig2.savefig(out_path_multi, dpi=300)
+        print(f"[plot_detection_results] Saved metric breakdown to {out_path_multi}")
+    else:
+        print("[plot_detection_results] Detailed metrics missing in summaries; "
+              "rerun training with updated script to generate them.")
 
 
 if __name__ == "__main__":

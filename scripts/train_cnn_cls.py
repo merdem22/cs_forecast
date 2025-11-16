@@ -35,7 +35,7 @@ from data.Hacettepe.cls.loader import EEGPredictionDataset
 # --- Assume these utils exist in the supervisor's repo ---
 # Make sure these paths ('utils. ...') are correct relative to your project root
 from utils.seed import set_seed
-from utils.metrics import binary_cls_metrics # Assuming this calculates accuracy correctly
+from utils.metrics import binary_cls_metrics, binary_classification_report
 from utils.logging import log_config #, log_config_file # log_config_file might need adjustment
 
 # --- Use the supervisor's training module and CNN model ---
@@ -184,7 +184,8 @@ def main(overrides=None):
     # Report threshold for metrics
     thr = float(report_cfg.get("threshold", 0.5))
 
-    fold_metrics = [] # Store metrics (e.g., accuracy) for each fold
+    fold_acc_values = []  # Accuracies for compatibility with older summaries
+    fold_metric_details: list[dict] = []  # Detailed metrics per fold
 
     fold_cfg = cfg.get("folds", {})
     fold_mode = fold_cfg.get("mode", "logo").lower()
@@ -313,13 +314,38 @@ def main(overrides=None):
                 if key in test_results[0]:
                     fold_acc = test_results[0][key]
                     break # Found the key
-
-        if fold_acc is not None:
-            fold_metrics.append(fold_acc)
+        metric_summary = None
+        if hasattr(module, "test_Y_true") and hasattr(module, "test_Y_pred"):
+            y_true = module.test_Y_true.detach().cpu().numpy().reshape(-1)
+            y_prob = module.test_Y_pred.detach().cpu().numpy().reshape(-1)
+            metric_summary = binary_classification_report(y_prob, y_true, threshold=thr)
+        if metric_summary is None and fold_acc is not None:
+            metric_summary = {"accuracy": float(fold_acc)}
+        if metric_summary is not None:
+            fold_metric_details.append(
+                {
+                    "fold": fold,
+                    "test_participants": [str(pid) for pid in test_pids],
+                    **metric_summary,
+                }
+            )
+            if "accuracy" in metric_summary:
+                fold_acc_values.append(metric_summary["accuracy"])
+        else:
+            fold_metric_details.append(
+                {
+                    "fold": fold,
+                    "test_participants": [str(pid) for pid in test_pids],
+                }
+            )
+            fold_acc_values.append(np.nan)
+        if metric_summary:
+            metric_str = " ".join(f"{k}={v:.4f}" for k, v in metric_summary.items())
+            print(f"[main] Fold {fold} metrics: {metric_str}")
+        elif fold_acc is not None:
             print(f"[main] Fold {fold} Test Accuracy: {fold_acc:.4f}")
         else:
-             print(f"[main] Warning: Could not find accuracy metric ({acc_key_options}) in test results for fold {fold}. Results: {test_results}")
-             fold_metrics.append(np.nan)
+            print(f"[main] Warning: Could not compute metrics for fold {fold}.")
 
         # --- Clean up W&B run for the fold ---
         if logger is not None:
@@ -335,7 +361,7 @@ def main(overrides=None):
             break
 
     # --- Aggregate and Report Final Results ---
-    valid_metrics = [m for m in fold_metrics if m is not None and not np.isnan(m)]
+    valid_metrics = [m for m in fold_acc_values if m is not None and not np.isnan(m)]
     if valid_metrics:
         mean_acc = np.mean(valid_metrics)
         std_acc = np.std(valid_metrics)
@@ -344,11 +370,33 @@ def main(overrides=None):
         print(f"Average Test Accuracy: {mean_acc:.4f} ± {std_acc:.4f}")
 
         # Save final aggregated results
+        aggregate_metrics = {}
+        metric_keys = sorted(
+            {
+                key
+                for rec in fold_metric_details
+                for key in rec.keys()
+                if key not in ("fold", "test_participants")
+            }
+        )
+        for key in metric_keys:
+            values = [
+                rec[key]
+                for rec in fold_metric_details
+                if key in rec and rec[key] is not None and not np.isnan(rec[key])
+            ]
+            if values:
+                aggregate_metrics[key] = {
+                    "mean": float(np.mean(values)),
+                    "std": float(np.std(values)),
+                }
         results_summary = {
-            "individual_fold_accuracies": fold_metrics, # Include potential NaNs
+            "individual_fold_accuracies": fold_acc_values, # Include potential NaNs
             "mean_accuracy": mean_acc if valid_metrics else None,
             "std_accuracy": std_acc if valid_metrics else None,
-            "config": cfg # Save the config used for this run
+            "config": cfg, # Save the config used for this run
+            "individual_fold_metrics": fold_metric_details,
+            "aggregate_metrics": aggregate_metrics,
         }
         summary_path = os.path.join(os.getenv("JOB_ROOT", "outputs"), "cross_val_summary.json")
         try:

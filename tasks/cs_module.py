@@ -4,7 +4,7 @@ import torch.nn as nn
 import pytorch_lightning as pl
 import torch.nn.functional as F
 from typing import Optional
-from utils.metrics import binary_cls_metrics
+from utils.metrics import binary_cls_metrics, binary_classification_report
 
 def _mae(pred, targ): return torch.mean(torch.abs(pred - targ))
 def _mse(pred, targ): return torch.mean((pred - targ) ** 2)
@@ -79,6 +79,21 @@ class CSDownstreamModule(pl.LightningModule):
     def on_test_epoch_end(self):
         self.test_Y_true = torch.vstack(self._test_y)
         self.test_Y_pred = torch.vstack(self._test_yhat)
+        if self.test_Y_true.numel() > 0:
+            report = binary_classification_report(
+                self.test_Y_pred,
+                self.test_Y_true,
+                threshold=self.cls_threshold,
+            )
+            self.test_metric_summary = report
+            for key, value in report.items():
+                self.log(
+                    f"test_{key}",
+                    value,
+                    prog_bar=False,
+                    on_epoch=True,
+                    batch_size=self.test_Y_true.shape[0],
+                )
         self._test_y, self._test_yhat = [], []
 
     def configure_optimizers(self):
