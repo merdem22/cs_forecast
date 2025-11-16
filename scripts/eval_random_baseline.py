@@ -1,8 +1,9 @@
 """
-Evaluate a random-guessing baseline using Leave-One-Participant-Out splits.
+Evaluate a random-guessing baseline using participant-aware splits.
 
+Each fold draws a single random prediction sequence (unless --repeats > 1).
 Usage:
-    python scripts/eval_random_baseline.py --npz data/npz/cdms_first4s.npz data/npz/cdms_2s_x4.npz
+    python scripts/eval_random_baseline.py --npz data/npz/cdms_1s_x8.npz
 """
 
 import argparse
@@ -44,7 +45,14 @@ def participant_kfold(groups: np.ndarray, k: int, seed: int):
         yield chunk.tolist(), np.where(~mask)[0], np.where(mask)[0]
 
 
-def random_baseline(labels: np.ndarray, groups: np.ndarray, repeats: int, seed: int, fold_mode: str, num_folds: int):
+def random_baseline(
+    labels: np.ndarray,
+    groups: np.ndarray,
+    repeats: int,
+    seed: int,
+    fold_mode: str,
+    num_folds: int,
+):
     rng = np.random.default_rng(seed)
     pos_prob = labels.mean()
     fold_metrics = []
@@ -55,10 +63,10 @@ def random_baseline(labels: np.ndarray, groups: np.ndarray, repeats: int, seed: 
     for gids, _, test_idx in iterator:
         y_true = labels[test_idx]
         accs = []
-        for r in range(repeats):
+        for _ in range(max(1, repeats)):
             preds = (rng.random(len(y_true)) < pos_prob).astype(int)
             accs.append((preds == y_true).mean())
-        fold_metrics.append((gids, np.mean(accs), np.std(accs)))
+        fold_metrics.append((gids, float(np.mean(accs)), float(np.std(accs))))
     return fold_metrics
 
 
@@ -80,7 +88,7 @@ def evaluate_dataset(npz_path: Path, repeats: int, seed: int, fold_mode: str, nu
 def parse_args():
     parser = argparse.ArgumentParser(description="Random guessing baseline for multiple datasets.")
     parser.add_argument("--npz", nargs="+", required=True, help="List of dataset npz files.")
-    parser.add_argument("--repeats", type=int, default=100, help="Random restarts per fold.")
+    parser.add_argument("--repeats", type=int, default=1, help="Random restarts per fold.")
     parser.add_argument("--seed", type=int, default=42, help="RNG seed.")
     parser.add_argument("--fold-mode", choices=["logo", "kfold"], default="kfold", help="Match training folds.")
     parser.add_argument("--num-folds", type=int, default=5, help="Number of participant folds when using kfold.")

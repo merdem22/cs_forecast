@@ -7,10 +7,11 @@ Usage:
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import matplotlib
 
@@ -57,13 +58,33 @@ def _load_dataset_stats(dataset_path: Path) -> dict:
     data = np.load(dataset_path, allow_pickle=True)
     labels = data["cs_labels"].astype(np.int32)
     pos_rate = labels.mean()
-    # Random baseline: predict class labels by sampling from dataset priors.
+    # Random baseline (analytic fallback) when simulation CSV missing.
     baseline = pos_rate ** 2 + (1.0 - pos_rate) ** 2
     return {
         "num_samples": int(labels.shape[0]),
         "positive_rate": float(pos_rate),
         "random_baseline": float(baseline),
     }
+
+
+def _load_random_baseline_csv(csv_path: Path) -> Dict[str, dict]:
+    if not csv_path.exists():
+        return {}
+    table: Dict[str, dict] = {}
+    with csv_path.open("r", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            dataset_name = row.get("dataset")
+            if not dataset_name:
+                continue
+            stem = Path(dataset_name).stem
+            try:
+                mean_acc = float(row["mean_accuracy"])
+                std_acc = float(row["std_accuracy"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            table[stem] = dict(mean=mean_acc, std=std_acc, source=str(csv_path))
+    return table
 
 
 def main():
@@ -76,12 +97,19 @@ def main():
     if not order:
         raise SystemExit("Detection dataset summaries missing. Run detection experiments first.")
 
+    baseline_table = _load_random_baseline_csv(ROOT / "reports" / "random_baseline_detection.csv")
+
     records: List[dict] = []
     for key in order:
         summary_entry = summaries[key]["summary"]
         dataset_rel = summary_entry["config"]["dataset"]["npz"]
         dataset_path = (ROOT / dataset_rel).resolve()
         stats = _load_dataset_stats(dataset_path)
+        baseline_entry: Optional[dict] = baseline_table.get(Path(dataset_rel).stem)
+        baseline_mean = (
+            baseline_entry["mean"] if baseline_entry is not None else stats["random_baseline"]
+        )
+        baseline_std = baseline_entry["std"] if baseline_entry is not None else 0.0
         records.append(
             dict(
                 key=key,
@@ -90,10 +118,14 @@ def main():
                 windows=DETECTION_DATASETS[key]["windows"],
                 dataset=dataset_rel,
                 num_samples=stats["num_samples"],
-                baseline=stats["random_baseline"],
+                baseline=baseline_mean,
+                baseline_std=baseline_std,
                 positive_rate=stats["positive_rate"],
                 mean_acc=float(summary_entry["mean_accuracy"]),
                 std_acc=float(summary_entry["std_accuracy"]),
+                baseline_source=(
+                    baseline_entry["source"] if baseline_entry is not None else "analytic"
+                ),
             )
         )
 
@@ -101,6 +133,7 @@ def main():
     x = np.arange(len(records))
     width = 0.35
     baseline_vals = [rec["baseline"] for rec in records]
+    baseline_err = [rec["baseline_std"] for rec in records]
     model_vals = [rec["mean_acc"] for rec in records]
     model_err = [rec["std_acc"] for rec in records]
 
@@ -108,8 +141,10 @@ def main():
         x - width / 2,
         baseline_vals,
         width,
+        yerr=baseline_err,
         color="#b0bec5",
-        label="Random baseline (prior sampling)",
+        label="Random baseline (simulated)",
+        capsize=6,
     )
     ax.bar(
         x + width / 2,
@@ -159,7 +194,8 @@ def main():
         print(
             f"{rec['label']}: acc={rec['mean_acc']:.3f}±{rec['std_acc']:.3f}, "
             f"baseline={rec['baseline']:.3f}, N={rec['num_samples']}, "
-            f"pos_rate={rec['positive_rate']:.3f}, dataset={rec['dataset']}"
+            f"pos_rate={rec['positive_rate']:.3f}, dataset={rec['dataset']}, "
+            f"baseline_source={rec['baseline_source']}"
         )
 
 
