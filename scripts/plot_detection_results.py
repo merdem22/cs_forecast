@@ -57,7 +57,8 @@ def _load_dataset_stats(dataset_path: Path) -> dict:
     data = np.load(dataset_path, allow_pickle=True)
     labels = data["cs_labels"].astype(np.int32)
     pos_rate = labels.mean()
-    baseline = max(pos_rate, 1.0 - pos_rate)
+    # Random baseline: predict class labels by sampling from dataset priors.
+    baseline = pos_rate ** 2 + (1.0 - pos_rate) ** 2
     return {
         "num_samples": int(labels.shape[0]),
         "positive_rate": float(pos_rate),
@@ -103,7 +104,13 @@ def main():
     model_vals = [rec["mean_acc"] for rec in records]
     model_err = [rec["std_acc"] for rec in records]
 
-    ax.bar(x - width / 2, baseline_vals, width, color="#b0bec5", label="Random baseline")
+    ax.bar(
+        x - width / 2,
+        baseline_vals,
+        width,
+        color="#b0bec5",
+        label="Random baseline (prior sampling)",
+    )
     ax.bar(
         x + width / 2,
         model_vals,
