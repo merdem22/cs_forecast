@@ -35,28 +35,20 @@ from data.Hacettepe.cls.loader import EEGPredictionDataset
 # --- Assume these utils exist in the supervisor's repo ---
 # Make sure these paths ('utils. ...') are correct relative to your project root
 from utils.seed import set_seed
-from utils.metrics import binary_cls_metrics, binary_classification_report
+from utils.metrics import binary_classification_report
 from utils.logging import log_config #, log_config_file # log_config_file might need adjustment
 
 # --- Use the supervisor's training module and CNN model ---
 # Make sure these paths ('tasks. ...', 'models. ...') are correct
 from tasks.cs_module import CSDownstreamModule
 from models.downstream.cnn import CNN
+from models.downstream.shallow import ShallowStage1
 
 
 DEFAULT_CONFIG = "configs/config.yaml"
 
 
 # --- Helper functions (adapted from supervisor's script) ---
-def _logo_split(groups: np.ndarray):
-    """Simple Leave-One-Group-Out split without sklearn dependency."""
-    unique_groups = np.unique(groups)
-    for gid in unique_groups:
-        test_mask = groups == gid
-        test_idx = np.where(test_mask)[0]
-        train_idx = np.where(~test_mask)[0]
-        yield gid, train_idx, test_idx
-
 def _resolve_config_path(default_path: str) -> str:
     """Finds the config file, prioritizing env vars."""
     env_path = os.getenv("CONFIG_PATH")
@@ -104,6 +96,7 @@ def _snapshot_config(cfg_path: str) -> str:
 
 # --- Fold helpers ---
 def _logo_split(groups: np.ndarray):
+    """Simple Leave-One-Group-Out split; returns test participant ids as a list."""
     unique_groups = np.unique(groups)
     for gid in unique_groups:
         mask = groups == gid
@@ -121,6 +114,62 @@ def _participant_kfold(groups: np.ndarray, k: int, seed: int):
     for chunk in chunks:
         mask = np.isin(groups, chunk)
         yield chunk.tolist(), np.where(~mask)[0], np.where(mask)[0]
+
+
+def _subject_stats(groups: np.ndarray, labels: np.ndarray, pos_threshold: float) -> list[dict]:
+    """Per-participant sample counts and positives."""
+    uniq = np.unique(groups)
+    labels_bin = (labels >= pos_threshold).astype(int)
+    stats = []
+    for pid in uniq:
+        mask = groups == pid
+        total = int(mask.sum())
+        pos = int(labels_bin[mask].sum())
+        stats.append({"pid": pid, "total": total, "pos": pos})
+    return stats
+
+
+def _balanced_kfold(groups: np.ndarray, labels: np.ndarray, k: int, seed: int, pos_threshold: float):
+    """
+    Greedy subject assignment to approximate balanced folds by class ratio and size.
+    Returns generator of (subjects, train_idx, test_idx).
+    """
+    stats = _subject_stats(groups, labels, pos_threshold)
+    if k <= 0 or k > len(stats):
+        raise ValueError(f"Invalid num_folds={k} for {len(stats)} participants.")
+
+    rng = np.random.default_rng(seed)
+    rng.shuffle(stats)  # shuffle first to break ties deterministically per seed
+    stats.sort(key=lambda r: (r["pos"], r["total"]), reverse=True)
+
+    seeds, remaining = stats[:k], stats[k:]
+    folds = [{"subjects": [s["pid"]], "total": s["total"], "pos": s["pos"]} for s in seeds]
+
+    global_total = sum(s["total"] for s in stats)
+    global_pos = sum(s["pos"] for s in stats)
+    global_ratio = (global_pos / global_total) if global_total else 0.0
+    target_total = global_total / k if k else 0.0
+    target_pos = global_pos / k if k else 0.0
+
+    for subj in remaining:
+        best_idx, best_score = None, float("inf")
+        for idx, fold in enumerate(folds):
+            total = fold["total"] + subj["total"]
+            pos = fold["pos"] + subj["pos"]
+            ratio_pen = abs((pos / total) - global_ratio) if total else 0.0
+            size_pen = abs(total - target_total) / target_total if target_total else 0.0
+            pos_pen = abs(pos - target_pos) / target_pos if target_pos else 0.0
+            score = ratio_pen + 0.5 * size_pen + 0.25 * pos_pen
+            if score < best_score:
+                best_idx, best_score = idx, score
+        folds[best_idx]["subjects"].append(subj["pid"])
+        folds[best_idx]["total"] += subj["total"]
+        folds[best_idx]["pos"] += subj["pos"]
+
+    for fold in folds:
+        subj_list = fold["subjects"]
+        mask = np.isin(groups, subj_list)
+        yield subj_list, np.where(~mask)[0], np.where(mask)[0]
 
 
 # --- Main Training Function ---
@@ -145,11 +194,8 @@ def main(overrides=None):
         tcfg["max_epochs"] = overrides["max_epochs"]
     if overrides.get("max_folds") is not None:
         tcfg["max_folds"] = overrides["max_folds"]
+    model_name = str(cfg["model"].get("name", "cnn")).lower()
     mcfg = cfg["model"]["params"].copy()
-    # Check if pretrained is specified and handle potential None value
-    pretrained_cfg_raw = mcfg.pop("pretrained", None)
-    pretrained_cfg = pretrained_cfg_raw if pretrained_cfg_raw is not None else {}
-
     wcfg = cfg.get("wandb", {})
     opt_cfg = cfg.get("optimizer", {})
     report_cfg = cfg.get("report", {})
@@ -188,9 +234,15 @@ def main(overrides=None):
     fold_metric_details: list[dict] = []  # Detailed metrics per fold
 
     fold_cfg = cfg.get("folds", {})
+    if overrides.get("fold_mode") is not None:
+        fold_cfg["mode"] = overrides["fold_mode"]
+    if overrides.get("num_folds") is not None:
+        fold_cfg["num_folds"] = overrides["num_folds"]
+
     fold_mode = fold_cfg.get("mode", "logo").lower()
     fold_num = fold_cfg.get("num_folds")
     fold_seed = int(fold_cfg.get("seed", seed))
+    labels_np = ds.lbl.detach().cpu().numpy().reshape(-1)
 
     if fold_mode == "logo":
         fold_iter = _logo_split(groups)
@@ -199,6 +251,11 @@ def main(overrides=None):
         if not fold_num:
             raise ValueError("folds.num_folds must be provided for kfold mode.")
         fold_iter = _participant_kfold(groups, int(fold_num), fold_seed)
+        total_folds = int(fold_num)
+    elif fold_mode in ("balanced", "balanced_kfold", "stratified"):
+        if not fold_num:
+            raise ValueError("folds.num_folds must be provided for balanced mode.")
+        fold_iter = _balanced_kfold(groups, labels_np, int(fold_num), fold_seed, thr)
         total_folds = int(fold_num)
     else:
         raise ValueError(f"Unknown fold mode '{fold_mode}'. Use 'logo' or 'kfold'.")
@@ -209,9 +266,10 @@ def main(overrides=None):
         print(f"Train size = {len(tr_idx)} | Test size = {len(te_idx)}")
         test_label = "-".join(map(str, test_pids))
 
-        # --- Per-Fold Logging Setup (W&B) ---
+        # --- Per-Fold Logging Setup (W&B or CSV fallback) ---
         logger = None
         run_name = None
+        job_root = os.getenv("JOB_ROOT", "outputs")
         if wcfg.get("enabled", False):
             try:
                 from pytorch_lightning.loggers import WandbLogger
@@ -221,7 +279,7 @@ def main(overrides=None):
                 run_name = f"{base_name}_fold{fold}_test{test_label}_seed{seed}"
 
                 # Ensure WANDB_DIR exists or is handleable by WandbLogger
-                wandb_dir = os.getenv("WANDB_DIR", os.path.join(os.getenv("JOB_ROOT", "outputs"), "wandb"))
+                wandb_dir = os.getenv("WANDB_DIR", os.path.join(job_root, "wandb"))
                 os.makedirs(wandb_dir, exist_ok=True)
 
                 logger = WandbLogger(
@@ -242,6 +300,15 @@ def main(overrides=None):
             except Exception as e:
                 print(f"[main] Warning: Error initializing WandbLogger: {e}")
 
+        if logger is None:
+            try:
+                from pytorch_lightning.loggers import CSVLogger
+                csv_base = Path(job_root) / "lightning"
+                csv_base.mkdir(parents=True, exist_ok=True)
+                logger = CSVLogger(save_dir=str(csv_base), name=f"{model_name}_fold{fold}_test{test_label}")
+            except Exception as e:
+                print(f"[main] Warning: CSVLogger could not be created: {e}")
+
         # --- Create DataLoaders for the current fold ---
         train_dl = DataLoader(
             Subset(ds, tr_idx), batch_size=batch_size, shuffle=True,
@@ -253,9 +320,19 @@ def main(overrides=None):
         )
 
         # --- Initialize Model for the current fold ---
-        # Ensure n_outputs=1 for binary classification with sigmoid output in CNN model
+        # Ensure n_outputs=1 for binary classification with sigmoid output
         print("[main] Initializing model...")
-        backbone = CNN(n_outputs=1, **mcfg) # Pass model params from config
+        if model_name == "cnn":
+            backbone = CNN(n_outputs=1, **mcfg)
+        elif model_name in ("shallow", "shallow_stage1", "shallowconvnet"):
+            # Allow either n_channels or in_channels_eeg naming
+            chan = mcfg.pop("n_channels", mcfg.pop("in_channels_eeg", 14))
+            # Drop params that are only relevant to the CNN configs
+            mcfg.pop("input_windows", None)
+            mcfg.pop("time_len", None)
+            backbone = ShallowStage1(n_channels=chan, n_outputs=1, **mcfg)
+        else:
+            raise ValueError(f"Unknown model.name '{model_name}'. Use 'cnn' or 'shallow'.")
 
         # --- Initialize the PyTorch Lightning Module ---
         # CSDownstreamModule likely handles optimizer setup, loss, etc.
@@ -347,15 +424,34 @@ def main(overrides=None):
         else:
             print(f"[main] Warning: Could not compute metrics for fold {fold}.")
 
+        # --- Save per-fold predictions for later analysis ---
+        try:
+            pred_dir = Path(os.getenv("JOB_ROOT", "outputs")) / "predictions"
+            pred_dir.mkdir(parents=True, exist_ok=True)
+            pred_path = pred_dir / f"fold{fold}_test{test_label}.npz"
+            np.savez_compressed(
+                pred_path,
+                fold=int(fold),
+                test_participants=np.asarray(test_pids, dtype=object),
+                y_true=y_true,
+                y_prob=y_prob,
+                threshold=thr,
+            )
+            print(f"[main] Saved fold predictions to {pred_path}")
+        except Exception as e:
+            print(f"[main] Warning: Could not save predictions for fold {fold}: {e}")
+
         # --- Clean up W&B run for the fold ---
         if logger is not None:
             try:
-                # Ensure all logs are sent before finishing
-                logger.experiment.log({}, commit=True)
-                logger.experiment.finish()
-                print("[main] W&B run finished.")
+                # W&B: ensure all logs are sent before finishing
+                exp = getattr(logger, "experiment", None)
+                if exp is not None and hasattr(exp, "finish"):
+                    exp.log({}, commit=True)
+                    exp.finish()
+                    print("[main] W&B run finished.")
             except Exception as e:
-                print(f"[main] Warning: Error finishing W&B run: {e}")
+                print(f"[main] Warning: Error finishing logger: {e}")
         if max_folds and fold >= int(max_folds):
             print(f"[main] Reached max_folds={max_folds}, stopping cross-validation early.")
             break
@@ -414,6 +510,8 @@ def parse_cli():
     parser.add_argument("--config", type=str, help="Override CONFIG_PATH with a specific YAML.")
     parser.add_argument("--max-epochs", type=int, help="Override trainer.max_epochs (useful for quick tests).")
     parser.add_argument("--max-folds", type=int, help="Override trainer.max_folds.")
+    parser.add_argument("--fold-mode", type=str, choices=["logo", "kfold", "balanced"], help="Override folds.mode.")
+    parser.add_argument("--num-folds", type=int, help="Override folds.num_folds.")
     parser.add_argument("--local-debug", action="store_true", help="Force single-process dataloading for quick tests.")
     return parser.parse_args()
 
@@ -427,6 +525,10 @@ if __name__ == "__main__":
         overrides["max_epochs"] = cli_args.max_epochs
     if cli_args.max_folds is not None:
         overrides["max_folds"] = cli_args.max_folds
+    if cli_args.fold_mode is not None:
+        overrides["fold_mode"] = cli_args.fold_mode
+    if cli_args.num_folds is not None:
+        overrides["num_folds"] = cli_args.num_folds
     if cli_args.local_debug:
         overrides["local_debug"] = True
     main(overrides=overrides)

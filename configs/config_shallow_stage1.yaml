@@ -1,0 +1,54 @@
+# Shallow ConvNet (Stage 1) for cybersickness detection on 8-second trials
+seed: 20170629
+
+dataset:
+  npz: data/npz/cdms_8s_x1.npz
+  input_windows: 1
+  forecast_windows: 0
+  task: detection
+  level_tau: 0.5
+  stride: 1
+  num_workers: 8
+  batch_size: 64          # Match the paper setup
+  pin_memory: true
+  channel_remap: null
+
+model:
+  name: shallow
+  params:
+    n_channels: 14
+    kernel_len: 25        # Temporal conv kernel (1x25)
+    F1: 40                # Filters for Stage 1 detection
+    pool_size: 75         # Mean pool kernel (Braindecode shallow default)
+    pool_stride: 15
+    dropout: 0.5
+    input_windows: 1
+
+optimizer:
+  lr: 0.0006              # 6e-4 as in the paper
+  weight_decay: 0.0
+
+trainer:
+  max_epochs: 1000        # Long training per paper; reduce locally if needed
+  min_epochs: 10
+  max_folds: null
+  accelerator: auto
+  devices: 1
+  enable_checkpointing: true
+  gradient_clip_val: 1.0
+  log_every_n_steps: 25
+
+folds:
+  mode: kfold
+  num_folds: 5
+  seed: 20170629
+
+scheduler: null           # No scheduler mentioned in the paper
+
+wandb:
+  enabled: false          # Toggle on if you want logging
+  project: cdms-shallow
+  name: shallow_stage1
+
+report:
+  threshold: 0.5
