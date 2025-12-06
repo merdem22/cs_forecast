@@ -196,6 +196,8 @@ def main(overrides=None):
         tcfg["max_folds"] = overrides["max_folds"]
     model_name = str(cfg["model"].get("name", "cnn")).lower()
     mcfg = cfg["model"]["params"].copy()
+    # Drop keys meant for other model wrappers
+    mcfg.pop("pretrained", None)
     wcfg = cfg.get("wandb", {})
     opt_cfg = cfg.get("optimizer", {})
     report_cfg = cfg.get("report", {})

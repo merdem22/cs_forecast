@@ -3,7 +3,7 @@
 Code for building EEG window datasets from the Hacettepe recordings and training simple CNNs for cybersickness detection/forecasting with participant-aware cross-validation.
 
 ## Repo map
-- `configs/`: YAML configs for different window lengths/stride setups (8s detection, 1s×8, 2s×4, 3s stride1, etc. plus early-window forecasting variants). Includes a `config_shallow_stage1.yaml` that approximates the paper’s Stage‑1 Shallow ConvNet.
+- `configs/`: YAML configs for detection (1s×8, 2s×4, 4s×2, 8s×1) and forecasting (first two 2s, first two 3s stride2, first three 3s stride1) for both CNN and Shallow models.
 - `data/Hacettepe/cls/`: Raw-to-window preprocessing (`preprocessing.py`), participant loop and NPZ writer (`dataset_builder.py`), and the PyTorch `EEGPredictionDataset` loader (`loader.py`).
 - `models/downstream/`: 1D CNN encoder/head used for downstream training.
 - `tasks/`: Lightning module wrapping the model, loss, optimizer, and test metrics.
@@ -22,9 +22,7 @@ Code for building EEG window datasets from the Hacettepe recordings and training
 2) **Train and evaluate** with participant-aware CV via PyTorch Lightning:
    ```bash
    python scripts/train_cnn_cls.py --config configs/config.yaml
-   # or pick another config_* for different windowing setups
-   # or the shallow Stage-1 reproduction:
-   python scripts/train_cnn_cls.py --config configs/config_shallow_stage1.yaml
+   # pick another config_* for different windowing setups (CNN or shallow variants)
    ```
    Cross-val modes: `folds.mode` can be `logo` (leave-one-participant), `kfold`, or `balanced` (greedy subject assignment to balance class ratios and fold sizes).
    - Uses LOGO or participant k-fold splits based on `folds` in the config.

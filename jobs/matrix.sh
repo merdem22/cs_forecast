@@ -12,7 +12,7 @@
 #SBATCH --time=0-12:00:00
 #SBATCH --output=/home/merdem22/hacettepe_forecast/outputs/logs/matrix_%A_%a.out
 #SBATCH --error=/home/merdem22/hacettepe_forecast/outputs/logs/matrix_%A_%a.err
-#SBATCH --array=0-29   # (num_configs * num_modes) - 1; update if you change lists below
+#SBATCH --array=0-41   # (num_configs * num_modes) - 1; update if you change lists below
 
 # ==============================================================================
 # ENVIRONMENT
@@ -40,16 +40,24 @@ export WANDB_DIR="${WANDB_DIR:-$PROJECT_ROOT/outputs/wandb}"
 # ==============================================================================
 # Detection + forecasting configs (CNN + Shallow)
 CONFIGS=(
+  # CNN detection
   "configs/config.yaml"                # 8s detection (CNN)
   "configs/config_1s8f.yaml"
   "configs/config_2s4f.yaml"
-  "configs/config_3s_stride1.yaml"
   "configs/config_4s2f.yaml"
-  "configs/config_8s1f.yaml"
-  "configs/config_fc_2s_first4.yaml"
-  "configs/config_fc_2s_stride1x3.yaml"
-  "configs/config_fc_3s_stride1x2.yaml"
-  "configs/config_shallow_stage1.yaml" # 8s detection (Shallow)
+  # CNN forecasting
+  "configs/config_fc_2s_first4.yaml"   # first two 2s windows
+  "configs/config_fc_3s_stride2x2.yaml" # first two 3s windows, stride 2
+  "configs/config_fc_3s_stride1x3.yaml" # first three 3s windows, stride 1
+  # Shallow detection
+  "configs/config_shallow_1s8f.yaml"
+  "configs/config_shallow_2s4f.yaml"
+  "configs/config_shallow_4s2f.yaml"
+  "configs/config_shallow_8s1f.yaml"
+  # Shallow forecasting
+  "configs/config_shallow_fc_2s_first4.yaml"
+  "configs/config_shallow_fc_3s_stride2x2.yaml"
+  "configs/config_shallow_fc_3s_stride1x3.yaml"
 )
 
 FOLD_MODES=(logo kfold balanced)

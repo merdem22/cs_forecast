@@ -1,0 +1,54 @@
+# Shallow ConvNet for forecasting: first three 3-second frames (stride 1)
+seed: 20170629
+
+dataset:
+  npz: data/npz/cdms_fc_3s_stride1x3.npz
+  input_windows: 1
+  forecast_windows: 0
+  task: detection
+  level_tau: 0.5
+  stride: 1
+  num_workers: 8
+  batch_size: 96
+  pin_memory: true
+  channel_remap: null
+
+model:
+  name: shallow
+  params:
+    n_channels: 14
+    kernel_len: 25
+    F1: 40
+    pool_size: 75
+    pool_stride: 15
+    dropout: 0.5
+    input_windows: 1
+
+optimizer:
+  lr: 0.0006
+  weight_decay: 0.0
+
+trainer:
+  max_epochs: 200
+  min_epochs: 10
+  max_folds: null
+  accelerator: auto
+  devices: 1
+  enable_checkpointing: true
+  gradient_clip_val: 1.0
+  log_every_n_steps: 25
+
+folds:
+  mode: kfold
+  num_folds: 5
+  seed: 20170629
+
+scheduler: null
+
+wandb:
+  enabled: false
+  project: cdms-shallow
+  name: shallow_fc_3s_stride1x3
+
+report:
+  threshold: 0.5

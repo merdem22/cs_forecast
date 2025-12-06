@@ -1,8 +1,8 @@
-# 3-second windows with 1-second stride (heavily overlapping)
+# Forecasting: two 3-second frames with stride 2
 seed: 20170629
 
 dataset:
-  npz: data/npz/cdms_3s_stride1.npz
+  npz: data/npz/cdms_fc_3s_stride2x2.npz
   input_windows: 1
   forecast_windows: 0
   task: detection
@@ -17,7 +17,7 @@ model:
   name: cnn
   params:
     in_channels_eeg: 14
-    time_len: 768         # 3 seconds * 256 Hz
+    time_len: 768          # 3 seconds * 256 Hz
     width: [64, 128]
     kernels: [11, 7]
     p_drop: 0.2
@@ -59,8 +59,8 @@ scheduler:
 
 wandb:
   enabled: true
-  project: cdms-predict
-  name: cnn_pred_3s_stride1
+  project: cdms-forecast
+  name: cnn_fc_3s_stride2x2
 
 report:
   threshold: 0.5

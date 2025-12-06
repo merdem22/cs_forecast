@@ -1,8 +1,8 @@
-# Forecasting: two 3-second frames (stride 1 second, early portion)
+# Forecasting: first three 3-second frames with stride 1
 seed: 20170629
 
 dataset:
-  npz: data/npz/cdms_fc_3s_stride1x2.npz
+  npz: data/npz/cdms_fc_3s_stride1x3.npz
   input_windows: 1
   forecast_windows: 0
   task: detection
@@ -60,7 +60,7 @@ scheduler:
 wandb:
   enabled: true
   project: cdms-forecast
-  name: cnn_fc_3s_stride1x2
+  name: cnn_fc_3s_stride1x3
 
 report:
   threshold: 0.5
