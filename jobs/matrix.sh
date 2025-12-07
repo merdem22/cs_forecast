@@ -26,8 +26,11 @@ cd "$PROJECT_ROOT" || exit 1
 echo "Project root: $(pwd)"
 
 # Optional: load modules / activate conda env
-# module load anaconda3/2025.06
-# source activate my-ai-env
+module load anaconda3/2025.06
+source "$(conda info --base)/etc/profile.d/conda.sh"
+conda activate my-ai-env
+
+PYTHON_BIN="${CONDA_PREFIX}/bin/python"
 
 export PYTHONPATH="$PROJECT_ROOT:$PYTHONPATH"
 
@@ -91,7 +94,7 @@ fi
 
 echo "Running config=$CONFIG_PATH | mode=$MODE | num_folds=${NUM_FOLDS_DEFAULT} | JOB_ROOT=$JOB_ROOT"
 
-python -u scripts/train_cnn_cls.py \
+${PYTHON_BIN:-python} -u scripts/train_cnn_cls.py \
   --config "$CONFIG_PATH" \
   --fold-mode "$MODE" \
   $NUM_FOLDS_ARG
