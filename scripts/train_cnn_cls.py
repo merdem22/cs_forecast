@@ -132,41 +132,58 @@ def _subject_stats(groups: np.ndarray, labels: np.ndarray, pos_threshold: float)
 def _balanced_kfold(groups: np.ndarray, labels: np.ndarray, k: int, seed: int, pos_threshold: float):
     """
     Greedy subject assignment to approximate balanced folds by class ratio and size.
-    Returns generator of (subjects, train_idx, test_idx).
+    Mirrors the heuristic from the provided example script, optionally searching k in [3, k].
     """
     stats = _subject_stats(groups, labels, pos_threshold)
     if k <= 0 or k > len(stats):
         raise ValueError(f"Invalid num_folds={k} for {len(stats)} participants.")
 
     rng = np.random.default_rng(seed)
-    rng.shuffle(stats)  # shuffle first to break ties deterministically per seed
-    stats.sort(key=lambda r: (r["pos"], r["total"]), reverse=True)
 
-    seeds, remaining = stats[:k], stats[k:]
-    folds = [{"subjects": [s["pid"]], "total": s["total"], "pos": s["pos"]} for s in seeds]
+    def _build(k_use: int):
+        rng.shuffle(stats)
+        ordered = sorted(stats, key=lambda r: (r["pos"], r["total"]), reverse=True)
+        seeds, remaining = ordered[:k_use], ordered[k_use:]
+        folds_local = [{"subjects": [s["pid"]], "total": s["total"], "pos": s["pos"]} for s in seeds]
 
-    global_total = sum(s["total"] for s in stats)
-    global_pos = sum(s["pos"] for s in stats)
-    global_ratio = (global_pos / global_total) if global_total else 0.0
-    target_total = global_total / k if k else 0.0
-    target_pos = global_pos / k if k else 0.0
+        global_total = sum(s["total"] for s in stats)
+        global_pos = sum(s["pos"] for s in stats)
+        global_ratio = (global_pos / global_total) if global_total else 0.0
+        target_total = global_total / k_use if k_use else 0.0
+        target_pos = global_pos / k_use if k_use else 0.0
 
-    for subj in remaining:
-        best_idx, best_score = None, float("inf")
-        for idx, fold in enumerate(folds):
-            total = fold["total"] + subj["total"]
-            pos = fold["pos"] + subj["pos"]
-            ratio_pen = abs((pos / total) - global_ratio) if total else 0.0
-            size_pen = abs(total - target_total) / target_total if target_total else 0.0
-            pos_pen = abs(pos - target_pos) / target_pos if target_pos else 0.0
-            score = ratio_pen + 0.5 * size_pen + 0.25 * pos_pen
-            if score < best_score:
-                best_idx, best_score = idx, score
-        folds[best_idx]["subjects"].append(subj["pid"])
-        folds[best_idx]["total"] += subj["total"]
-        folds[best_idx]["pos"] += subj["pos"]
+        for subj in remaining:
+            best_idx, best_score = None, float("inf")
+            for idx, fold in enumerate(folds_local):
+                total = fold["total"] + subj["total"]
+                pos = fold["pos"] + subj["pos"]
+                ratio_pen = abs((pos / total) - global_ratio) if total else 0.0
+                size_pen = abs(total - target_total) / target_total if target_total else 0.0
+                pos_pen = abs(pos - target_pos) / target_pos if target_pos else 0.0
+                score = ratio_pen + 0.5 * size_pen + 0.25 * pos_pen
+                if score < best_score:
+                    best_idx, best_score = idx, score
+            folds_local[best_idx]["subjects"].append(subj["pid"])
+            folds_local[best_idx]["total"] += subj["total"]
+            folds_local[best_idx]["pos"] += subj["pos"]
 
-    for fold in folds:
+        max_ratio_dev = max(abs((f["pos"] / f["total"]) - global_ratio) for f in folds_local if f["total"] > 0)
+        size_span = max(f["total"] for f in folds_local) - min(f["total"] for f in folds_local)
+        return folds_local, global_ratio, max_ratio_dev, size_span
+
+    k_min = 3
+    k_max = min(k, len(stats))
+    best = None
+    for k_use in range(k_min, k_max + 1):
+        folds_local, global_ratio, ratio_dev, size_span = _build(k_use)
+        cand = dict(k=k_use, folds=folds_local, global_ratio=global_ratio, ratio_dev=ratio_dev, size_span=size_span)
+        if best is None or ratio_dev < best["ratio_dev"] or (ratio_dev == best["ratio_dev"] and size_span < best["size_span"]):
+            best = cand
+
+    if best is None:
+        raise RuntimeError("Balanced fold construction failed.")
+
+    for fold in best["folds"]:
         subj_list = fold["subjects"]
         mask = np.isin(groups, subj_list)
         yield subj_list, np.where(~mask)[0], np.where(mask)[0]
@@ -257,7 +274,7 @@ def main(overrides=None):
     elif fold_mode in ("balanced", "balanced_kfold", "stratified"):
         if not fold_num:
             raise ValueError("folds.num_folds must be provided for balanced mode.")
-        fold_iter = _balanced_kfold(groups, labels_np, int(fold_num), fold_seed, thr)
+        fold_iter = _balanced_kfold(groups, labels_np, int(fold_num), fold_seed, thr, min_subjects=fold_min_subj)
         total_folds = int(fold_num)
     else:
         raise ValueError(f"Unknown fold mode '{fold_mode}'. Use 'logo' or 'kfold'.")

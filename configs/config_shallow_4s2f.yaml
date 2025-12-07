@@ -21,15 +21,15 @@ model:
     F1: 40
     pool_size: 75
     pool_stride: 15
-    dropout: 0.5
+    dropout: 0.4
     input_windows: 1
 
 optimizer:
-  lr: 0.0006
-  weight_decay: 0.0
+  lr: 0.001
+  weight_decay: 0.001
 
 trainer:
-  max_epochs: 200
+  max_epochs: 50
   min_epochs: 10
   max_folds: null
   accelerator: auto
